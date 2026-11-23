@@ -115,5 +115,37 @@ def test_prodajalec_objavi_oglas(client, db):
 def test_sprejem_ponudbe_samodejno_zavrne_ostale(client, db):
     prodajalec = ustvari_uporabnika(db, "prod@test.si", role="seller")
     kupec1 = ustvari_uporabnika(db, "k1@test.si")
+    kupec2 = ustvari_uporabnika(db, "k2@test.si")
+    oglas = ustvari_oglas(db, prodajalec)
+    p1 = ustvari_ponudbo(db, oglas, kupec1, 14000)
+    p2 = ustvari_ponudbo(db, oglas, kupec2, 13500)
+    prijava(client, "prod@test.si")
+    client.post(f"/seller/offers/{p1.id}/accept")
+    db.expire_all()
+    assert db.get(Offer, p1.id).status == "accepted"
+    assert db.get(Offer, p2.id).status == "rejected"
+    assert db.get(Listing, oglas.id).status == "rezerviran"
 
-    
+
+def test_zavrnitev_pusti_oglas_aktiven(client, db):
+    prodajalec = ustvari_uporabnika(db, "prod@test.si", role="seller")
+    kupec = ustvari_uporabnika(db, "k1@test.si")
+    oglas = ustvari_oglas(db, prodajalec)
+    p = ustvari_ponudbo(db, oglas, kupec)
+    prijava(client, "prod@test.si")
+    client.post(f"/seller/offers/{p.id}/reject")
+    db.expire_all()
+    assert db.get(Offer, p.id).status == "rejected"
+    assert db.get(Listing, oglas.id).status == "aktivni"
+
+
+def test_prodan_samo_iz_rezerviranega(client, db):
+    prodajalec = ustvari_uporabnika(db, "prod@test.si", role="seller")
+    aktiven = ustvari_oglas(db, prodajalec, model="A")
+    rezerviran = ustvari_oglas(db, prodajalec, model="B", status="rezerviran")
+    prijava(client, "prod@test.si")
+    client.post(f"/seller/listings/{aktiven.id}/sold")
+    client.post(f"/seller/listings/{rezerviran.id}/sold")
+    db.expire_all()
+    assert db.get(Listing, aktiven.id).status == "aktivni"
+    assert db.get(Listing, rezerviran.id).status == "prodan"

@@ -66,4 +66,3 @@ def test_email_regex():
     assert EMAIL_RE.match("kupec@avtotrg.si")
     assert not EMAIL_RE.match("ni-email")
 
-    
