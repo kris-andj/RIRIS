@@ -1,5 +1,11 @@
 # AvtoTrg – spletna platforma za trgovanje z rabljenimi avtomobili (RIRIS)
 
+[![CI/CD](https://github.com/kris-andj/RIRIS/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/kris-andj/RIRIS/actions/workflows/ci-cd.yml)
+
+**Aplikacija v živo:** https://avtotrg.onrender.com
+
+> Brezplačna instanca na Renderju se ob neaktivnosti ustavi, zato lahko prvo nalaganje traja do 1 minute.
+
 Kupec odda **strukturirano ponudbo** na oglas, prodajalec jo **sprejme** (ob tem se vse ostale ponudbe na oglasu samodejno zavrnejo, oglas preide v `rezerviran`) ali **zavrne**. Po prodaji prodajalec oglas označi kot `prodan`.
 
 ## Tehnološki stack
@@ -11,6 +17,40 @@ Kupec odda **strukturirano ponudbo** na oglas, prodajalec jo **sprejme** (ob tem
 | Podatkovna baza | PostgreSQL 18 v Dockerju |
 | Avtentikacija | Starlette `SessionMiddleware` + bcrypt |
 | Testni podatki | Faker |
+
+## CI/CD pipeline
+
+Pipeline je definiran v `.github/workflows/ci-cd.yml` in se zažene ob vsakem pull requestu na `main` in ob vsakem pushu na `main`.
+
+| Faza | Kaj naredi |
+|---|---|
+| **lint** | Ruff preveri Python kodo (backend), djLint preveri Jinja2 predloge (frontend). Konfiguracija je v `pyproject.toml`. Ob napaki pipeline pade. |
+| **build** | Namesti odvisnosti (s predpomnjenjem pip), preveri backend (`compileall`) in prevede vse predloge, zgradi Docker sliko in jo shrani kot artefakt `avtotrg-image`. |
+| **test** | Zažene 25 testov (pytest) na PostgreSQL service containerju. Poročilo o pokritosti (`coverage.xml`, `htmlcov/`) se shrani kot artefakt `coverage-report`. Če test pade, pade tudi pipeline. |
+| **deploy** | Samo ob pushu na `main` in samo, če lint, build in test uspejo. Prenese sliko iz build artefakta (brez ponovnega builda), jo objavi na GitHub Container Registry in sproži deploy na Render prek deploy hooka. |
+
+Deploy uporablja okolje **production** (Settings → Environments), v katerem je skrivnost `RENDER_DEPLOY_HOOK_URL`.
+
+### Produkcija (Render)
+
+- **Spletna storitev:** Docker slika `ghcr.io/kris-andj/avtotrg:latest`
+- **Baza:** Render PostgreSQL
+- **Okoljske spremenljivke:** `DATABASE_URL` (povezava do baze) in `SECRET_KEY`. Obličje (Jinja2 predloge) streže zaledje, nastavitve pa bere iz okoljskih spremenljivk.
+- Ob zagonu `init_db.py` ustvari tabele (`schema.sql`) in napolni demo podatke, če baza še ni napolnjena.
+
+### Zaščita veje main
+
+Na veji `main` so obvezni status checki **lint**, **build** in **test**. Pull requesta ni mogoče združiti, dokler vsi trije ne uspejo.
+
+### Lint in testi lokalno
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+djlint frontend/templates --lint
+docker exec avtotrg-postgres createdb -U avtotrg avtotrg_test
+pytest --cov=backend
+```
 
 ## Struktura
 
@@ -103,4 +143,3 @@ Varnost pred dvojnim sprejemom zagotavlja **edinstven delni indeks** `idx_offers
 - Prodana oglasa ni mogoče urejati.
 - Blokiran uporabnik se ne more prijaviti.
 - Admin ne more blokirati samega sebe, ne drugega admina, ne spremeniti lastne vloge.
-
