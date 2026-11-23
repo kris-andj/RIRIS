@@ -1,0 +1,143 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/avtotrg
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Namesti odvisnosti
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint backend (Ruff)
+        run: ruff check .
+
+      - name: Lint frontend (djLint)
+        run: djlint frontend/templates --lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Namesti odvisnosti
+        run: pip install -r requirements.txt
+
+      - name: Build backend
+        run: python -m compileall -q backend seed.py init_db.py
+
+      - name: Build frontend
+        run: |
+          python -c "from backend.settings import templates; [templates.env.get_template(n) for n in templates.env.list_templates()]"
+
+      - name: Build Docker slike
+        run: |
+          docker build -t avtotrg:${{ github.sha }} .
+          docker save avtotrg:${{ github.sha }} | gzip > avtotrg-image.tar.gz
+
+      - name: Shrani build artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: avtotrg-image
+          path: avtotrg-image.tar.gz
+          retention-days: 7
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: avtotrg
+          POSTGRES_PASSWORD: avtotrg
+          POSTGRES_DB: avtotrg_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U avtotrg"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://avtotrg:avtotrg@localhost:5433/avtotrg_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Namesti odvisnosti
+        run: pip install -r requirements-dev.txt
+
+      - name: Zaženi teste s pokritostjo
+        run: pytest --cov=backend --cov-report=term --cov-report=xml --cov-report=html
+
+      - name: Shrani poročilo o pokritosti
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint, build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Prenesi build artefakt
+        uses: actions/download-artifact@v4
+        with:
+          name: avtotrg-image
+
+      - name: Naloži Docker sliko
+        run: gunzip -c avtotrg-image.tar.gz | docker load
+
+      - name: Prijava v GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Objavi sliko
+        run: |
+          docker tag avtotrg:${{ github.sha }} $IMAGE_NAME:latest
+          docker tag avtotrg:${{ github.sha }} $IMAGE_NAME:${{ github.sha }}
+          docker push $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Deploy na Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
+        

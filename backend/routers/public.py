@@ -131,12 +131,12 @@ def api_listings(
         "total": total,
         "listings": [
             {
-                "id": l.id, "make": l.make, "model": l.model, "year": l.year,
-                "mileage_km": l.mileage_km, "fuel": l.fuel,
-                "transmission": l.transmission, "price_eur": float(l.price_eur),
-                "status": l.status, "seller": l.seller.full_name,
-                "created_at": l.created_at.isoformat(),
+                "id": oglas.id, "make": oglas.make, "model": oglas.model, "year": oglas.year,
+                "mileage_km": oglas.mileage_km, "fuel": oglas.fuel,
+                "transmission": oglas.transmission, "price_eur": float(oglas.price_eur),
+                "status": oglas.status, "seller": oglas.seller.full_name,
+                "created_at": oglas.created_at.isoformat(),
             }
-            for l in listings
+            for oglas in listings
         ],
     }
